@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Web3 WebSocket Test</title>
+    <script src="https://cdn.jsdelivr.net/gh/ethereum/web3.js@1.7.0/dist/web3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsencrypt/3.0.0-rc.1/jsencrypt.min.js"></script>
+  </head>
+  <body>
+    <br />
+    <div>
+      <input
+        type="text"
+        id="phoneNumber"
+        placeholder="Enter your phone number"
+      />
+    </div>
+    <br />
+    <div>
+      <input
+        type="text"
+        id="typeMethod"
+        placeholder="Enter typeMethod (0 or 1)"
+      />
+      <button onclick="requestAuthentication()">Generate OTP</button>
+    </div>
+    <br />
+    <span> enum TypeMethod { WhatsApp, Telegram }</span>
+
+    <p id="result"></p>
+    <p id="resultotp"></p>
+    <p id="verifyResult"></p>
+
+    <script type="module">
+      import { contractABI, contractAddress } from "../configs/contractABI.js";
+
+      let contractMetaMask; // Dùng MetaMask để gửi giao dịch
+      let contractWebSocket; // Dùng WebSocket để lắng nghe sự kiện
+      let web3MetaMask;
+      let web3WebSocket;
+
+      async function initializeContract() {
+        try {
+          if (!window.ethereum) {
+            document.getElementById("result").innerText =
+              "Please install MetaMask!";
+            return false;
+          }
+
+          web3MetaMask = new Web3(window.ethereum);
+          await window.ethereum.request({ method: "eth_requestAccounts" });
+
+          web3WebSocket = new Web3("wss://bsc-testnet-rpc.publicnode.com");
+
+          contractMetaMask = new web3MetaMask.eth.Contract(
+            contractABI,
+            contractAddress
+          );
+          contractWebSocket = new web3WebSocket.eth.Contract(
+            contractABI,
+            contractAddress
+          );
+
+          if (!contractMetaMask || !contractWebSocket) {
+            throw new Error("Contract initialization failed.");
+          }
+
+          console.log("Contract initialized successfully at:", contractAddress);
+          return true;
+        } catch (error) {
+          console.error(
+            "Error initializing contract:",
+            error.message,
+            error.stack
+          );
+          document.getElementById("result").innerText =
+            "Error initializing contract: " + error.message;
+          return false;
+        }
+      }
+
+      window.requestAuthentication = async function () {
+        if (!contractMetaMask) {
+          const initialized = await initializeContract();
+          if (!initialized) return;
+        }
+        try {
+          const phone = document.getElementById("phoneNumber").value;
+          const typeMethod = document.getElementById("typeMethod").value;
+
+          if (!phone) throw new Error("Phone number is required.");
+
+          const typeMethodNum = parseInt(typeMethod, 10);
+          if (
+            isNaN(typeMethodNum) ||
+            (typeMethodNum !== 0 && typeMethodNum !== 1)
+          ) {
+            throw new Error("typeMethod must be 0 (WhatsApp) or 1 (Telegram).");
+          }
+          // Tạo cặp khóa RSA
+          const crypt = new JSEncrypt({ default_key_size: 2048 });
+          crypt.getKey();
+          const publicKey = crypt.getPublicKey(); // Lấy public key dạng PEM
+          const rsaPrivateKey = crypt.getPrivateKey(); // Lưu private key nếu cần sau này
+
+          console.log("Sending data:", phone, publicKey, typeMethodNum);
+
+          const accounts = await web3MetaMask.eth.getAccounts();
+          if (!accounts || accounts.length === 0) {
+            throw new Error("No accounts found in MetaMask.");
+          }
+
+          const tx = await contractMetaMask.methods
+            .requestAuthentication(phone, publicKey, typeMethodNum)
+            .send({ from: accounts[0] });
+
+          console.log("Transaction hash:", tx.transactionHash);
+          console.log("Transaction receipt:", tx);
+
+          const receipt = await web3MetaMask.eth.getTransactionReceipt(
+            tx.transactionHash
+          );
+          if (receipt.status) {
+            console.log("Transaction successful:", receipt);
+            document.getElementById(
+              "result"
+            ).innerText = `Sent successfully to ${phone}`;
+            listenForEvents(tx.transactionHash); // Gọi hàm lắng nghe với txHash
+          } else {
+            throw new Error("Transaction failed on blockchain.");
+          }
+        } catch (error) {
+          console.error("Error details:", {
+            message: error.message,
+            code: error.code,
+            data: error.data,
+            stack: error.stack,
+          });
+          document.getElementById(
+            "result"
+          ).innerText = `Error sending OTP: ${error.message} (Code: ${error.code})`;
+        }
+      };
+
+      function listenForEvents(txHash) {
+        if (!contractWebSocket) {
+          console.error(
+            "Contract WebSocket is not initialized for event listening!"
+          );
+          return;
+        }
+
+        web3WebSocket.eth
+          .getBlockNumber()
+          .then((blockNumber) => {
+            console.log("Starting to listen from block:", blockNumber - 10);
+
+            // Lắng nghe AuthenticationRequested
+            contractWebSocket.events
+              .AuthenticationRequested({ fromBlock: blockNumber - 10 })
+              .on("data", function (event) {
+                console.log("AuthenticationRequested event:", event);
+                const { returnValues, transactionHash } = event;
+                const senderAddress = returnValues[0];
+                const otp = returnValues[1];
+                const botPhoneNumber = returnValues[2];
+                const botTypeMethod = returnValues[3];
+
+                if (transactionHash === txHash) {
+                  // Chỉ hiển thị sự kiện từ giao dịch vừa gửi
+                  document.getElementById(
+                    "resultotp"
+                  ).innerText = `OTP: ${otp} sent by bot ${botPhoneNumber} (${
+                    botTypeMethod == 0 ? "WhatsApp" : "Telegram"
+                  }) for user ${senderAddress}`;
+                }
+              })
+              .on("error", function (error) {
+                console.error(
+                  "Error in AuthenticationRequested listening:",
+                  error
+                );
+              })
+              .on("connected", function (subscriptionId) {
+                console.log(
+                  "Subscribed to AuthenticationRequested with ID:",
+                  subscriptionId
+                );
+              });
+
+            // Lắng nghe OTPVerified
+            contractWebSocket.events
+              .OTPVerified({ fromBlock: blockNumber - 10 })
+              .on("data", function (event) {
+                console.log("OTPVerified event:", event);
+                const { returnValues, transactionHash } = event;
+                const userPhoneNumber = returnValues[0];
+                const success = returnValues[1];
+                const message = returnValues[2];
+                const publicKey = returnValues[3];
+
+                document.getElementById(
+                  "verifyResult"
+                ).innerText = `Phone: ${userPhoneNumber}, Success: ${success}, Message: ${message}`;
+              })
+              .on("error", function (error) {
+                console.error("Error in OTPVerified listening:", error);
+              })
+              .on("connected", function (subscriptionId) {
+                console.log(
+                  "Subscribed to OTPVerified with ID:",
+                  subscriptionId
+                );
+              });
+          })
+          .catch((error) => {
+            console.error("Error getting block number:", error);
+          });
+      }
+      window.onload = initializeContract;
+    </script>
+  </body>
+</html> 
