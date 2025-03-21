@@ -1,7 +1,4 @@
 # Hướng Dẫn Triển Khai Bot WhatsApp API
-//YS23V5G6L3KZKMPXEK4YH6HY
-//15557292631
-//https://developers.facebook.com/apps/1090363283107015/whatsapp-business/wa-dev-console/?business_id=2117416135359199
 
 Hướng dẫn cách đăng ký, cấu hình và triển khai bot sử dụng WhatsApp Business API với Webhook.
 
