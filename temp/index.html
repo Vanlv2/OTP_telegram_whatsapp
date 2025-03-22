@@ -3,18 +3,26 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Web3 WebSocket Test with Private Key</title>
+    <title>Web3 WebSocket Test</title>
     <script src="https://cdn.jsdelivr.net/gh/ethereum/web3.js@1.7.0/dist/web3.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jsencrypt/3.0.0-rc.1/jsencrypt.min.js"></script>
   </head>
   <body>
     <br />
     <div>
-      <input type="text" id="phoneNumber" placeholder="Enter your phone number" />
+      <input
+        type="text"
+        id="phoneNumber"
+        placeholder="Enter your phone number"
+      />
     </div>
     <br />
     <div>
-      <input type="text" id="typeMethod" placeholder="Enter typeMethod (0 or 1)" />
+      <input
+        type="text"
+        id="typeMethod"
+        placeholder="Enter typeMethod (0 or 1)"
+      />
       <button onclick="requestAuthentication()">Generate OTP</button>
     </div>
     <br />
@@ -25,32 +33,34 @@
     <p id="verifyResult"></p>
 
     <script type="module">
-      import { privateKey, contractABI, contractAddress } from "../configs/contractABI.js";
+      import { contractABI, contractAddress } from "../configs/contractABI.js";
 
-      let contractMetaMask; // Dùng để gửi giao dịch
+      let contractMetaMask; // Dùng MetaMask để gửi giao dịch
       let contractWebSocket; // Dùng WebSocket để lắng nghe sự kiện
       let web3MetaMask;
       let web3WebSocket;
 
-      // Thay đổi: Thêm private key (lưu ý: không nên hardcode trong thực tế)
-      const rpcUrl = "https://bsc-testnet-rpc.publicnode.com"; // RPC URL cho BSC Testnet
-
       async function initializeContract() {
         try {
-          // Khởi tạo Web3 với RPC URL thay vì MetaMask
-          web3MetaMask = new Web3(rpcUrl);
+          if (!window.ethereum) {
+            document.getElementById("result").innerText =
+              "Please install MetaMask!";
+            return false;
+          }
+
+          web3MetaMask = new Web3(window.ethereum);
+          await window.ethereum.request({ method: "eth_requestAccounts" });
+
           web3WebSocket = new Web3("wss://bsc-testnet-rpc.publicnode.com");
 
-          // Thêm tài khoản từ private key
-          const account = web3MetaMask.eth.accounts.privateKeyToAccount(privateKey);
-          web3MetaMask.eth.accounts.wallet.add(account);
-          const senderAddress = account.address;
-
-          console.log("Using account:", senderAddress);
-
-          // Khởi tạo contract
-          contractMetaMask = new web3MetaMask.eth.Contract(contractABI, contractAddress);
-          contractWebSocket = new web3WebSocket.eth.Contract(contractABI, contractAddress);
+          contractMetaMask = new web3MetaMask.eth.Contract(
+            contractABI,
+            contractAddress
+          );
+          contractWebSocket = new web3WebSocket.eth.Contract(
+            contractABI,
+            contractAddress
+          );
 
           if (!contractMetaMask || !contractWebSocket) {
             throw new Error("Contract initialization failed.");
@@ -59,7 +69,11 @@
           console.log("Contract initialized successfully at:", contractAddress);
           return true;
         } catch (error) {
-          console.error("Error initializing contract:", error.message, error.stack);
+          console.error(
+            "Error initializing contract:",
+            error.message,
+            error.stack
+          );
           document.getElementById("result").innerText =
             "Error initializing contract: " + error.message;
           return false;
@@ -78,43 +92,41 @@
           if (!phone) throw new Error("Phone number is required.");
 
           const typeMethodNum = parseInt(typeMethod, 10);
-          if (isNaN(typeMethodNum) || (typeMethodNum !== 0 && typeMethodNum !== 1)) {
+          if (
+            isNaN(typeMethodNum) ||
+            (typeMethodNum !== 0 && typeMethodNum !== 1)
+          ) {
             throw new Error("typeMethod must be 0 (WhatsApp) or 1 (Telegram).");
           }
-
           // Tạo cặp khóa RSA
           const crypt = new JSEncrypt({ default_key_size: 2048 });
           crypt.getKey();
-          const publicKey = crypt.getPublicKey();
-          const rsaPrivateKey = crypt.getPrivateKey();
+          const publicKey = crypt.getPublicKey(); // Lấy public key dạng PEM
+          const rsaPrivateKey = crypt.getPrivateKey(); // Lưu private key nếu cần sau này
 
           console.log("Sending data:", phone, publicKey, typeMethodNum);
 
-          const account = web3MetaMask.eth.accounts.wallet[0]; // Lấy tài khoản từ wallet
-          const senderAddress = account.address;
+          const accounts = await web3MetaMask.eth.getAccounts();
+          if (!accounts || accounts.length === 0) {
+            throw new Error("No accounts found in MetaMask.");
+          }
 
-          // Chuẩn bị giao dịch
-          const tx = {
-            from: senderAddress,
-            to: contractAddress,
-            data: contractMetaMask.methods
-              .requestAuthentication(phone, publicKey, typeMethodNum)
-              .encodeABI(),
-            gas: 1000000, // Ước lượng gas (có thể cần điều chỉnh)
-            gasPrice: await web3MetaMask.eth.getGasPrice(),
-          };
+          const tx = await contractMetaMask.methods
+            .requestAuthentication(phone, publicKey, typeMethodNum)
+            .send({ from: accounts[0] });
 
-          // Ký giao dịch bằng private key
-          const signedTx = await web3MetaMask.eth.accounts.signTransaction(tx, privateKey);
-          const txReceipt = await web3MetaMask.eth.sendSignedTransaction(signedTx.rawTransaction);
+          console.log("Transaction hash:", tx.transactionHash);
+          console.log("Transaction receipt:", tx);
 
-          console.log("Transaction hash:", txReceipt.transactionHash);
-          console.log("Transaction receipt:", txReceipt);
-
-          if (txReceipt.status) {
-            console.log("Transaction successful:", txReceipt);
-            document.getElementById("result").innerText = `Sent successfully to ${phone}`;
-            listenForEvents(txReceipt.transactionHash); // Gọi hàm lắng nghe với txHash
+          const receipt = await web3MetaMask.eth.getTransactionReceipt(
+            tx.transactionHash
+          );
+          if (receipt.status) {
+            console.log("Transaction successful:", receipt);
+            document.getElementById(
+              "result"
+            ).innerText = `Sent successfully to ${phone}`;
+            listenForEvents(tx.transactionHash); // Gọi hàm lắng nghe với txHash
           } else {
             throw new Error("Transaction failed on blockchain.");
           }
@@ -125,13 +137,17 @@
             data: error.data,
             stack: error.stack,
           });
-          document.getElementById("result").innerText = `Error sending OTP: ${error.message} (Code: ${error.code})`;
+          document.getElementById(
+            "result"
+          ).innerText = `Error sending OTP: ${error.message} (Code: ${error.code})`;
         }
       };
 
       function listenForEvents(txHash) {
         if (!contractWebSocket) {
-          console.error("Contract WebSocket is not initialized for event listening!");
+          console.error(
+            "Contract WebSocket is not initialized for event listening!"
+          );
           return;
         }
 
@@ -152,6 +168,7 @@
                 const botTypeMethod = returnValues[3];
 
                 if (transactionHash === txHash) {
+                  // Chỉ hiển thị sự kiện từ giao dịch vừa gửi
                   document.getElementById(
                     "resultotp"
                   ).innerText = `OTP: ${otp} sent by bot ${botPhoneNumber} (${
@@ -160,10 +177,16 @@
                 }
               })
               .on("error", function (error) {
-                console.error("Error in AuthenticationRequested listening:", error);
+                console.error(
+                  "Error in AuthenticationRequested listening:",
+                  error
+                );
               })
               .on("connected", function (subscriptionId) {
-                console.log("Subscribed to AuthenticationRequested with ID:", subscriptionId);
+                console.log(
+                  "Subscribed to AuthenticationRequested with ID:",
+                  subscriptionId
+                );
               });
 
             // Lắng nghe OTPVerified
@@ -185,15 +208,17 @@
                 console.error("Error in OTPVerified listening:", error);
               })
               .on("connected", function (subscriptionId) {
-                console.log("Subscribed to OTPVerified with ID:", subscriptionId);
+                console.log(
+                  "Subscribed to OTPVerified with ID:",
+                  subscriptionId
+                );
               });
           })
           .catch((error) => {
             console.error("Error getting block number:", error);
           });
       }
-
       window.onload = initializeContract;
     </script>
   </body>
-</html>
+</html> 

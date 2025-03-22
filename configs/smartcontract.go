@@ -10,7 +10,7 @@ const AccessToken = "EAAPfrfwqbMcBO2ZA0xphpRvTQg1TubDKQ984fmBf7FRVKSSyh04pDa8ube
 const TelegramBotToken = "7746087401:AAFiG3CA9ZT_5u2prA0tRyCYrkAUy0qAcDs"
 
 const PrivateKey = "1318c69b804769a5472a284f80853d4c54914fbf289be1bac2480f82886b43bf"
-const ContractAddress = "0x297EF83d065aa15CEf15DB68ce7585B7BD7c5539"
+const ContractAddress = "0xd0E24776D6254E54EC3645105f6c07166a819f5e"
 const ContractABI = `[
 	{
 		"anonymous": false,

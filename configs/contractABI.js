@@ -1,5 +1,5 @@
 export const privateKey ="1318c69b804769a5472a284f80853d4c54914fbf289be1bac2480f82886b43bf";
-export const contractAddress = "0x297EF83d065aa15CEf15DB68ce7585B7BD7c5539";
+export const contractAddress = "0xd0E24776D6254E54EC3645105f6c07166a819f5e";
 export const contractABI = [
   {
     anonymous: false,

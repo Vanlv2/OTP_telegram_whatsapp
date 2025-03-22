@@ -8,7 +8,9 @@ import (
 	"math/big"
 	"net/http"
 	"otp/configs"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
@@ -54,14 +56,57 @@ func ProcessTelegramWebhook(body []byte, contractAddr common.Address, contractAB
 
 	fmt.Println("Received message from Telegram:", update.Message.Text)
 
-	otpBigInt, err := strconv.ParseUint(update.Message.Text, 10, 0)
+	// Lấy phoneNumber và otp từ tin nhắn
+	phoneNumber, otpStr, err := getPhoneNumberAndOTP(update.Message.Text)
 	if err != nil {
-		log.Printf("Error parsing OTP text to uint256: %v", err)
+		log.Printf("Error extracting phone number and OTP: %v", err)
 		return
 	}
 
-	otp := new(big.Int).SetUint64(otpBigInt)
+	// Chuyển otp từ string sang uint64
+	otp, err := strconv.ParseUint(otpStr, 10, 64)
+	if err != nil {
+		log.Printf("Error parsing OTP to uint64: %v", err)
+		return
+	}
+
+	// Chuyển otp từ uint64 sang *big.Int
+	otpBig := new(big.Int).SetUint64(otp)
 
 	// Thực hiện xác thực OTP
-	OTPVerified(contractAddr, contractABI, client, update.Message.From.Username, otp, update.Message.Chat.ID, "Telegram")
+	OTPVerified(contractAddr, contractABI, client, phoneNumber, otpBig, update.Message.Chat.ID, "Telegram")
+}
+
+func getPhoneNumberAndOTP(messger string) (string, string, error) {
+	// Loại bỏ khoảng trống thừa và ký tự xuống hàng
+	cleaned := strings.TrimSpace(messger)                // Xóa khoảng trống đầu/cuối
+	cleaned = strings.Join(strings.Fields(cleaned), " ") // Chuẩn hóa khoảng trống giữa các từ
+
+	// Tách chuỗi thành các phần
+	parts := strings.Split(cleaned, " ")
+	if len(parts) < 2 {
+		log.Println("Error: String format is invalid!")
+		return "", "", fmt.Errorf("invalid string format")
+	}
+
+	phoneNumber := parts[0]
+	otp := parts[1]
+
+	// Kiểm tra định dạng số điện thoại: Chỉ cần là chuỗi số, có thể bắt đầu bằng + hoặc 0
+	phoneRegex := regexp.MustCompile(`^\+?\d+$`) // Chấp nhận số bắt đầu bằng + hoặc không, chỉ chứa chữ số
+	if !phoneRegex.MatchString(phoneNumber) {
+		log.Println("Error: Invalid phone number format!")
+		return "", "", fmt.Errorf("invalid phone number format")
+	}
+
+	// Kiểm tra định dạng OTP: 6 chữ số
+	otpRegex := regexp.MustCompile(`^\d{6}$`)
+	if !otpRegex.MatchString(otp) {
+		log.Println("Error: Invalid OTP format!")
+		return "", "", fmt.Errorf("invalid OTP format")
+	}
+
+	log.Println("Success: Phone Number:", phoneNumber)
+	log.Println("Success: OTP:", otp)
+	return phoneNumber, otp, nil
 }
